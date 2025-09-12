@@ -52,9 +52,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## API Endpoints
 
+### Local Development
 - `GET /`: Health check with generator count
 - `GET /generators`: List available generators with schemas  
 - `POST /stream/{generator_name}`: Start streaming data with configuration
+
+### Live Production (Railway)
+- **Base URL**: `https://simtom-production.up.railway.app`
+- `GET /`: Health check with generator count
+- `GET /generators`: List available generators with schemas
+- `POST /stream/bnpl`: Stream BNPL risk data with configuration
+
+### Example Usage
+```bash
+# Test live API
+curl https://simtom-production.up.railway.app/generators
+
+# Stream BNPL data
+curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
+  -H "Content-Type: application/json" \
+  -d '{"rate_per_second": 2.0, "total_records": 5, "seed": 42}'
+```
 
 ## Development Workflow
 
