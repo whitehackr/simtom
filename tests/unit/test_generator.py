@@ -5,7 +5,7 @@ from typing import Dict, Any
 from simtom.core.generator import BaseGenerator, GeneratorConfig, NoiseType, DriftType
 
 
-class TestGenerator(BaseGenerator):
+class MockGenerator(BaseGenerator):
     async def generate_record(self) -> Dict[str, Any]:
         return {"id": self._records_generated, "value": 42}
 
@@ -13,7 +13,7 @@ class TestGenerator(BaseGenerator):
 @pytest.mark.asyncio
 async def test_base_generator_stream():
     config = GeneratorConfig(rate_per_second=10.0, total_records=3)
-    generator = TestGenerator(config)
+    generator = MockGenerator(config)
     
     records = []
     async for record in generator.stream():
@@ -28,7 +28,7 @@ async def test_base_generator_stream():
         assert "_timestamp" in record
         assert "_record_id" in record
         assert "_generator" in record
-        assert record["_generator"] == "TestGenerator"
+        assert record["_generator"] == "MockGenerator"
 
 
 @pytest.mark.asyncio
