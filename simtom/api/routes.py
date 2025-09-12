@@ -3,12 +3,24 @@ from fastapi.responses import StreamingResponse
 from typing import List
 import json
 import asyncio
+from datetime import datetime, date
 
 from .models import GeneratorRequest, GeneratorInfo, StreamResponse, HealthResponse
 from ..core.registry import PluginRegistry
 from ..core.generator import GeneratorConfig
 
 router = APIRouter()
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime and date objects."""
+    
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, date):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 @router.get("/", response_model=HealthResponse)
@@ -43,7 +55,7 @@ async def stream_data(generator_name: str, config: GeneratorConfig):
     
     async def generate_stream():
         async for record in generator.stream():
-            yield f"data: {json.dumps(record)}\n\n"
+            yield f"data: {json.dumps(record, cls=DateTimeEncoder)}\n\n"
     
     return StreamingResponse(
         generate_stream(),
