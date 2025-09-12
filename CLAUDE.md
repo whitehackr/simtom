@@ -74,6 +74,8 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -d '{"rate_per_second": 2.0, "total_records": 5, "seed": 42}'
 ```
 
+For detailed arrival pattern examples, see [README.md](README.md).
+
 ## Development Workflow
 
 ### Adding New Generators
