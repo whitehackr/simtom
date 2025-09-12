@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional, List
 from enum import Enum
 import asyncio
 import math
@@ -7,6 +7,8 @@ import numpy as np
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+
+from .arrival_patterns import ArrivalPattern, ArrivalPatternCalculator
 
 
 class NoiseType(str, Enum):
@@ -25,21 +27,43 @@ class DriftType(str, Enum):
 
 
 class GeneratorConfig(BaseModel):
+    # Core generation parameters
     rate_per_second: float = Field(default=1.0, ge=0.1, le=1000.0)
     total_records: Optional[int] = Field(default=None, ge=1)
+    
+    # Arrival pattern configuration
+    arrival_pattern: ArrivalPattern = Field(default=ArrivalPattern.UNIFORM)
+    peak_hours: List[int] = Field(default_factory=lambda: [12, 19])  # Lunch and dinner peaks
+    burst_intensity: float = Field(default=2.0, ge=1.0, le=10.0)
+    burst_probability: float = Field(default=0.1, ge=0.0, le=1.0)
+    
+    # Data quality parameters  
     noise_type: NoiseType = Field(default=NoiseType.NONE)
     noise_level: float = Field(default=0.0, ge=0.0, le=1.0)
     drift_type: DriftType = Field(default=DriftType.NONE)
     drift_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    
+    # Time and determinism
     seed: Optional[int] = Field(default=None)
     start_time: datetime = Field(default_factory=datetime.utcnow)
     time_compression: float = Field(default=1.0, ge=0.1, le=1000.0)
+    
+    # TODO: Future arrival pattern parameters
+    # weekend_multiplier: float = Field(default=0.7, ge=0.1, le=5.0)  # Weekend vs weekday traffic
+    # seasonal_events: List[str] = Field(default_factory=list)        # ["black_friday", "christmas"]
+    # timezone: str = Field(default="UTC")                            # For global e-commerce patterns
 
 
 class BaseGenerator(ABC):
     def __init__(self, config: GeneratorConfig):
         self.config = config
         self._records_generated = 0
+        
+        # Initialize arrival pattern calculator
+        self.arrival_calculator = ArrivalPatternCalculator(
+            start_time=config.start_time,
+            time_compression=config.time_compression
+        )
         
     @property
     def name(self) -> str:
@@ -151,9 +175,7 @@ class BaseGenerator(ABC):
         
         return value
     
-    async def stream(self) -> AsyncGenerator[Dict[str, Any], None]:
-        delay = 1.0 / self.config.rate_per_second
-        
+    async def stream(self) -> AsyncGenerator[Dict[str, Any], None]:        
         while True:
             if (self.config.total_records and 
                 self._records_generated >= self.config.total_records):
@@ -173,5 +195,18 @@ class BaseGenerator(ABC):
             
             self._records_generated += 1
             yield record
+            
+            # Calculate next arrival time based on pattern
+            arrival_config = {
+                'peak_hours': self.config.peak_hours,
+                'burst_intensity': self.config.burst_intensity,
+                'burst_probability': self.config.burst_probability
+            }
+            
+            delay = await self.arrival_calculator.next_interval(
+                self.config.arrival_pattern,
+                self.config.rate_per_second,
+                arrival_config
+            )
             
             await asyncio.sleep(delay)
