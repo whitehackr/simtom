@@ -4,9 +4,9 @@ from enum import Enum
 import asyncio
 import math
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 from .arrival_patterns import ArrivalPattern, ArrivalPatternCalculator
 
@@ -30,28 +30,50 @@ class GeneratorConfig(BaseModel):
     # Core generation parameters
     rate_per_second: float = Field(default=1.0, ge=0.1, le=1000.0)
     total_records: Optional[int] = Field(default=None, ge=1)
-    
+
     # Arrival pattern configuration
     arrival_pattern: ArrivalPattern = Field(default=ArrivalPattern.UNIFORM)
     peak_hours: List[int] = Field(default_factory=lambda: [12, 19])  # Lunch and dinner peaks
     burst_intensity: float = Field(default=2.0, ge=1.0, le=10.0)
     burst_probability: float = Field(default=0.1, ge=0.0, le=1.0)
-    
-    # Data quality parameters  
+
+    # Historical date range parameters
+    start_date: Optional[date] = Field(default=None, description="Start date for historical data (YYYY-MM-DD)")
+    end_date: Optional[date] = Field(default=None, description="End date for historical data (YYYY-MM-DD)")
+    include_holiday_patterns: bool = Field(default=True, description="Include holiday traffic patterns")
+    weekend_multiplier: float = Field(default=0.85, ge=0.1, le=5.0, description="Weekend vs weekday traffic ratio")
+
+    # Data quality parameters
     noise_type: NoiseType = Field(default=NoiseType.NONE)
     noise_level: float = Field(default=0.0, ge=0.0, le=1.0)
     drift_type: DriftType = Field(default=DriftType.NONE)
     drift_strength: float = Field(default=0.0, ge=0.0, le=1.0)
-    
+
     # Time and determinism
     seed: Optional[int] = Field(default=None)
     start_time: datetime = Field(default_factory=datetime.utcnow)
     time_compression: float = Field(default=1.0, ge=0.1, le=1000.0)
-    
-    # TODO: Future arrival pattern parameters
-    # weekend_multiplier: float = Field(default=0.7, ge=0.1, le=5.0)  # Weekend vs weekday traffic
-    # seasonal_events: List[str] = Field(default_factory=list)        # ["black_friday", "christmas"]
-    # timezone: str = Field(default="UTC")                            # For global e-commerce patterns
+
+    @validator('end_date')
+    def validate_date_range(cls, v, values):
+        """Validate date range constraints."""
+        if 'start_date' in values and values['start_date'] and v:
+            start_date = values['start_date']
+
+            # end_date must be >= start_date
+            if v < start_date:
+                raise ValueError('end_date must be >= start_date')
+
+            # Date range cannot exceed 1 year
+            if (v - start_date).days > 365:
+                raise ValueError('date range cannot exceed 365 days')
+
+        return v
+
+    @validator('start_date')
+    def validate_partial_date_range(cls, v, values):
+        """Ensure we don't have partial date ranges."""
+        return v
 
 
 class BaseGenerator(ABC):
@@ -175,38 +197,51 @@ class BaseGenerator(ABC):
         
         return value
     
-    async def stream(self) -> AsyncGenerator[Dict[str, Any], None]:        
+    async def stream(self) -> AsyncGenerator[Dict[str, Any], None]:
         while True:
-            if (self.config.total_records and 
+            if (self.config.total_records and
                 self._records_generated >= self.config.total_records):
                 break
-                
+
             # Generate base record
             record = await self.generate_record()
-            
+
             # Apply transformations
             record = await self.apply_noise(record)
             record = await self.apply_drift(record)
-            
-            # Add metadata
-            record["_timestamp"] = datetime.utcnow().isoformat()
+
+            # Add metadata with appropriate timestamp
+            timestamp = self._get_record_timestamp()
+            record["_timestamp"] = timestamp.isoformat()
             record["_record_id"] = self._records_generated
             record["_generator"] = self.name
-            
+
             self._records_generated += 1
             yield record
-            
+
             # Calculate next arrival time based on pattern
             arrival_config = {
                 'peak_hours': self.config.peak_hours,
                 'burst_intensity': self.config.burst_intensity,
                 'burst_probability': self.config.burst_probability
             }
-            
+
             delay = await self.arrival_calculator.next_interval(
                 self.config.arrival_pattern,
                 self.config.rate_per_second,
                 arrival_config
             )
-            
+
             await asyncio.sleep(delay)
+
+    def _get_record_timestamp(self) -> datetime:
+        """Get timestamp for the current record.
+
+        If generator supports historical timestamps and has them available,
+        use those. Otherwise use current time.
+        """
+        # Check if generator has historical timestamp support
+        if hasattr(self, '_get_next_historical_timestamp'):
+            return self._get_next_historical_timestamp()
+        else:
+            return datetime.utcnow()
