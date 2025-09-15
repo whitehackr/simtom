@@ -35,6 +35,8 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
 
 - **🎯 Realistic Traffic Patterns**: Uniform, Poisson, NHPP, and Burst arrival patterns
 - **📊 Rich Data Generation**: BNPL transactions with risk scoring and customer profiles
+- **📅 Historical Data Generation**: Generate years of data with realistic temporal patterns
+- **🎄 Holiday & Seasonal Effects**: Black Friday +60%, Christmas +30%, weekend reductions
 - **⏱️ Time Compression**: Simulate days/weeks of data in minutes
 - **🔧 Plugin Architecture**: Easy extension with custom generators
 - **📡 Real-time Streaming**: Server-sent events with configurable rates
@@ -43,17 +45,40 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
 ## 📋 Quick Start
 
 ### Try the Live API
+
+#### Real-time Data Streaming
 ```bash
 # Check health and available generators
 curl https://simtom-production.up.railway.app/
 
-# List all available generators
-curl https://simtom-production.up.railway.app/generators
-
-# Stream BNPL synthetic data
+# Stream live BNPL data (current timestamps)
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
   -d '{"rate_per_second": 2.0, "total_records": 5, "seed": 42}'
+```
+
+#### Historical Data for ML Training
+```bash
+# Generate 3 months of historical BNPL data
+curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2024-06-01",
+    "end_date": "2024-09-01",
+    "rate_per_second": 100,
+    "total_records": 10000,
+    "seed": 42
+  }' > historical_bnpl_data.jsonl
+
+# Fast generation of full year dataset
+curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2024-01-01",
+    "end_date": "2024-12-31",
+    "rate_per_second": 1000,
+    "total_records": 365000
+  }' > bnpl_full_year.jsonl
 ```
 
 ### Local Installation
@@ -73,21 +98,61 @@ curl http://localhost:8000/generators
 ### Basic Usage
 
 ```python
-from simtom.generators.ecommerce.bnpl import BNPLGenerator
-from simtom.core.generator import GeneratorConfig
+from simtom.generators.ecommerce.bnpl import BNPLGenerator, BNPLConfig
+from datetime import date
 
-# Configure generator
-config = GeneratorConfig(
+# Real-time streaming (current timestamps)
+config = BNPLConfig(
     rate_per_second=10.0,
     total_records=1000,
     seed=42
 )
 
-# Generate synthetic BNPL data
 generator = BNPLGenerator(config)
 async for record in generator.stream():
     print(record)  # Process each synthetic transaction
+
+# Historical data generation (specific date range)
+historical_config = BNPLConfig(
+    start_date=date(2024, 1, 1),
+    end_date=date(2024, 12, 31),
+    rate_per_second=100.0,
+    total_records=50000,
+    seed=42
+)
+
+historical_generator = BNPLGenerator(historical_config)
+async for record in historical_generator.stream():
+    print(record)  # Historical transactions with realistic patterns
 ```
+
+## 📅 Historical Data Generation
+
+Generate realistic historical datasets with proper temporal patterns for ML training and backtesting.
+
+### Key Features
+- **Date Range Support**: Generate data for any period up to 1 year
+- **Business Hour Patterns**: 70% during 9am-6pm, 20% evenings, 10% nights
+- **Weekend Adjustments**: 15% reduction on weekends (realistic e-commerce patterns)
+- **Holiday Effects**: Configurable traffic spikes for major shopping holidays
+- **Chronological Ordering**: All timestamps properly sorted for time-series analysis
+
+### Holiday Traffic Multipliers
+```json
+{
+  "black_friday": 1.6,        // +60% traffic (biggest shopping day)
+  "cyber_monday": 1.4,        // +40% traffic
+  "christmas_shopping": 1.3,  // +30% during Christmas season
+  "valentines_day": 1.15,     // +15% traffic
+  "mothers_day": 1.15,        // +15% traffic
+  "back_to_school": 1.2       // +20% during back-to-school season
+}
+```
+
+### Performance
+- **Generation Speed**: ~100K records per minute at max rate
+- **No Real-time Delays**: Historical mode generates as fast as possible
+- **Memory Efficient**: Streaming output prevents memory buildup
 
 ## 🚦 Arrival Patterns
 
