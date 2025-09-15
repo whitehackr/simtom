@@ -112,10 +112,63 @@ class MyGenerator(BaseGenerator):
 ```python
 class GeneratorConfig(BaseModel):
     """Configuration for data generation."""
+    # Core generation parameters
     rate_per_second: float = Field(1.0, ge=0.1, le=1000.0)
     total_records: Optional[int] = Field(None, ge=0)
     seed: Optional[int] = Field(None)
     time_compression: float = Field(1.0, ge=0.1, le=1000.0)
+
+    # Historical date range parameters (NEW)
+    start_date: Optional[date] = Field(None, description="Start date for historical data")
+    end_date: Optional[date] = Field(None, description="End date for historical data")
+    include_holiday_patterns: bool = Field(True, description="Include holiday traffic patterns")
+    weekend_multiplier: float = Field(0.85, description="Weekend vs weekday traffic ratio")
+```
+
+**Key Features:**
+- **Historical Data Generation**: Generate data for specific date ranges with realistic temporal patterns
+- **Holiday Effects**: Configurable traffic multipliers for major shopping holidays (industry-specific)
+- **Business Hour Patterns**: 70% during 9am-6pm, 20% evenings, 10% nights
+- **Weekend Adjustments**: Configurable reduction in weekend activity
+
+#### `holidays.py` - Holiday System (NEW)
+
+**Purpose**: Industry-agnostic holiday calculation with context-specific effects
+
+```python
+def get_major_holidays(year: int) -> Dict[str, date]:
+    """Calculate major holidays for a given year."""
+    return {
+        'black_friday': calculate_black_friday(year),
+        'christmas_day': date(year, 12, 25),
+        'valentines_day': date(year, 2, 14),
+        # ... more holidays
+    }
+
+def get_active_holidays(target_date: date) -> List[str]:
+    """Get all holidays/periods active on a specific date."""
+```
+
+**Key Design Principles:**
+- **Industry Agnostic**: Holiday calculation separate from business impact
+- **Generator-Specific Effects**: Each generator defines its own holiday multipliers
+- **Extensible**: Easy to add new holidays or periods
+- **Performance**: Holiday calculations cached per year
+
+**Example Usage:**
+```python
+class BNPLConfig(BaseEcommerceConfig):
+    holiday_multipliers: Dict[str, float] = {
+        'black_friday': 1.6,        # +60% for e-commerce
+        'christmas_shopping': 1.3,  # +30% for Christmas season
+    }
+
+# Different industries have different effects
+class B2BConfig(GeneratorConfig):
+    holiday_multipliers: Dict[str, float] = {
+        'black_friday': 0.7,        # -30% for B2B (offices closed)
+        'christmas_week': 0.3,      # -70% for year-end shutdowns
+    }
 ```
 
 ### API Layer (`simtom/api/`)
