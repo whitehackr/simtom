@@ -81,6 +81,67 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   }' > bnpl_full_year.jsonl
 ```
 
+### Response Format
+
+The streaming endpoints return **Server-Sent Events (SSE)** format, where each record is prefixed with `data: `:
+
+```
+data: {"transaction_id": "txn_00000000", "timestamp": "2025-09-15T11:10:21.307911", "customer_id": "cust_000001", "amount": 143.02, ...}
+data: {"transaction_id": "txn_00000001", "timestamp": "2025-09-15T11:10:21.318045", "customer_id": "cust_000002", "amount": 67.89, ...}
+```
+
+#### Parsing SSE Responses
+
+**Python Example:**
+```python
+import requests
+import json
+
+response = requests.post(
+    'https://simtom-production.up.railway.app/stream/bnpl',
+    json={"rate_per_second": 10, "total_records": 5},
+    stream=True
+)
+
+for line in response.iter_lines(decode_unicode=True):
+    if line.startswith('data: '):
+        json_data = line[6:]  # Remove 'data: ' prefix
+        record = json.loads(json_data)
+        print(record['transaction_id'], record['amount'])
+```
+
+**JavaScript Example:**
+```javascript
+fetch('/stream/bnpl', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rate_per_second: 10, total_records: 5})
+})
+.then(response => response.body.getReader())
+.then(reader => {
+    const decoder = new TextDecoder();
+    function read() {
+        return reader.read().then(({done, value}) => {
+            if (done) return;
+            const lines = decoder.decode(value).split('\n');
+            lines.forEach(line => {
+                if (line.startsWith('data: ')) {
+                    const record = JSON.parse(line.substring(6));
+                    console.log(record.transaction_id, record.amount);
+                }
+            });
+            return read();
+        });
+    }
+    return read();
+});
+```
+
+**Important Notes:**
+- Standard JSON parsers will **fail** without handling the `data: ` prefix
+- Use streaming HTTP clients for large datasets to avoid memory issues
+- Each line contains a complete JSON record (no multi-line JSON)
+
 ### Local Installation
 
 ```bash
