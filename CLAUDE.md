@@ -64,14 +64,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `POST /stream/bnpl`: Stream BNPL risk data with configuration
 
 ### Example Usage
+
+#### Real-time Streaming (Live Data)
 ```bash
 # Test live API
 curl https://simtom-production.up.railway.app/generators
 
-# Stream BNPL data
+# Stream live BNPL data (current timestamps)
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
   -d '{"rate_per_second": 2.0, "total_records": 5, "seed": 42}'
+```
+
+#### Historical Data Generation (For ML Training)
+```bash
+# Generate 3 months of historical BNPL data with realistic patterns
+curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2024-06-01",
+    "end_date": "2024-09-01",
+    "rate_per_second": 100,
+    "total_records": 10000,
+    "seed": 42,
+    "include_holiday_patterns": true
+  }'
+
+# Fast bulk generation for large datasets
+curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2024-01-01",
+    "end_date": "2024-12-31",
+    "rate_per_second": 1000,
+    "total_records": 100000,
+    "seed": 42
+  }' > bnpl_2024_data.jsonl
 ```
 
 ## Development Workflow

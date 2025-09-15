@@ -1,11 +1,12 @@
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta, date, time
 import random
 from enum import Enum
 
 from .base import BaseEcommerceGenerator, BaseEcommerceConfig
 from ...core.generator import GeneratorConfig
 from ...core.registry import register_generator
+from ...core.holidays import get_active_holidays, is_weekend
 
 
 class BNPLRiskLevel(str, Enum):
@@ -17,7 +18,7 @@ class BNPLRiskLevel(str, Enum):
 
 class BNPLConfig(BaseEcommerceConfig):
     """Configuration for BNPL risk scenario generation."""
-    
+
     # Risk scenario distribution
     risk_scenario_weights: Dict[str, float] = {
         "low_risk_purchase": 0.60,      # Normal, creditworthy customers
@@ -25,13 +26,28 @@ class BNPLConfig(BaseEcommerceConfig):
         "credit_stretched": 0.15,       # Near credit limits
         "high_risk_behavior": 0.05      # Multiple red flags
     }
-    
+
     # Economic stress simulation
     economic_stress_factor: float = 0.0  # 0.0 = normal, 1.0 = recession
-    
+
     # Default simulation parameters
     base_default_rate: float = 0.03     # 3% base default rate
     seasonal_multiplier: float = 1.2    # Higher defaults post-holidays
+
+    # E-commerce specific holiday multipliers (realistic increases)
+    holiday_multipliers: Dict[str, float] = {
+        'black_friday': 1.6,        # +60% (biggest shopping day)
+        'cyber_monday': 1.4,        # +40%
+        'black_friday_week': 1.3,   # +30% for the week
+        'christmas_shopping': 1.3,  # +30% for Christmas season
+        'christmas_eve': 1.2,       # +20%
+        'post_christmas': 1.25,     # +25% (sales/returns)
+        'valentines_day': 1.15,     # +15%
+        'mothers_day': 1.15,        # +15%
+        'fathers_day': 1.1,         # +10%
+        'back_to_school': 1.2,      # +20%
+        'halloween': 1.1,           # +10%
+    }
 
 
 @register_generator("bnpl")
@@ -45,13 +61,21 @@ class BNPLGenerator(BaseEcommerceGenerator):
             bnpl_config = BNPLConfig(**config.model_dump())
         else:
             bnpl_config = config
-            
+
         super().__init__(bnpl_config)
         self.bnpl_config = bnpl_config
-        
+
         # Risk patterns
         self.risk_scenarios = list(bnpl_config.risk_scenario_weights.keys())
         self.scenario_weights = list(bnpl_config.risk_scenario_weights.values())
+
+        # Initialize historical timestamp generation if date range specified
+        self.use_historical_timestamps = (
+            bnpl_config.start_date is not None and bnpl_config.end_date is not None
+        )
+        if self.use_historical_timestamps:
+            self._historical_timestamps = self._generate_historical_timestamps()
+            self._timestamp_index = 0
     
     async def generate_record(self) -> Dict[str, Any]:
         """Generate BNPL transaction with risk indicators."""
@@ -109,11 +133,104 @@ class BNPLGenerator(BaseEcommerceGenerator):
             transaction["time_on_site_seconds"] = random.randint(30, 120)  # Very quick
         
         return transaction
-    
+
+    def _generate_historical_timestamps(self) -> List[datetime]:
+        """Generate realistic historical timestamps distributed across date range."""
+        if not self.use_historical_timestamps:
+            return []
+
+        total_records = self.config.total_records or 100
+        start_date = self.bnpl_config.start_date
+        end_date = self.bnpl_config.end_date
+
+        timestamps = []
+        total_days = (end_date - start_date).days + 1
+
+        for i in range(total_records):
+            # Distribute records evenly across the date range
+            day_progress = i / total_records
+            day_offset = int(day_progress * total_days)
+            target_date = start_date + timedelta(days=day_offset)
+
+            # Generate realistic time with business patterns and holiday effects
+            timestamp = self._generate_realistic_datetime(target_date)
+            timestamps.append(timestamp)
+
+        # Sort chronologically for realistic data flow
+        timestamps.sort()
+        return timestamps
+
+    def _generate_realistic_datetime(self, target_date: date) -> datetime:
+        """Generate realistic datetime for a specific date with business patterns."""
+        # Get traffic multiplier for holiday effects
+        traffic_multiplier = self._get_traffic_multiplier_for_date(target_date)
+
+        # Apply weekend reduction
+        if is_weekend(target_date):
+            traffic_multiplier *= self.config.weekend_multiplier
+
+        # Generate time of day with business hour weighting
+        hour = self._generate_business_hour()
+        minute = random.randint(0, 59)
+        second = random.randint(0, 59)
+
+        # Create datetime
+        dt = datetime.combine(target_date, time(hour, minute, second))
+
+        # Store traffic multiplier for potential use in risk calculations
+        # (This could influence transaction amounts, risk scores, etc.)
+
+        return dt
+
+    def _get_traffic_multiplier_for_date(self, target_date: date) -> float:
+        """Get traffic multiplier for a specific date based on holidays."""
+        if not self.config.include_holiday_patterns:
+            return 1.0
+
+        active_holidays = get_active_holidays(target_date)
+
+        # Find the highest multiplier from active holidays
+        max_multiplier = 1.0
+        for holiday in active_holidays:
+            if holiday in self.bnpl_config.holiday_multipliers:
+                multiplier = self.bnpl_config.holiday_multipliers[holiday]
+                max_multiplier = max(max_multiplier, multiplier)
+
+        return max_multiplier
+
+    def _generate_business_hour(self) -> int:
+        """Generate hour of day with realistic business patterns.
+
+        E-commerce patterns:
+        - 70% during business hours (9am-6pm)
+        - 20% during evening hours (6pm-11pm)
+        - 10% during night/early morning (11pm-9am)
+        """
+        rand = random.random()
+
+        if rand < 0.7:
+            # Business hours (9am-6pm)
+            return random.randint(9, 17)
+        elif rand < 0.9:
+            # Evening hours (6pm-11pm)
+            return random.randint(18, 22)
+        else:
+            # Night/early morning (11pm-9am)
+            return random.choice(list(range(23, 24)) + list(range(0, 9)))
+
+    def _get_next_historical_timestamp(self) -> datetime:
+        """Get the next historical timestamp, or current time if not using historical."""
+        if not self.use_historical_timestamps or self._timestamp_index >= len(self._historical_timestamps):
+            return datetime.utcnow()
+
+        timestamp = self._historical_timestamps[self._timestamp_index]
+        self._timestamp_index += 1
+        return timestamp
+
     def _add_risk_indicators(
         self,
         transaction: Dict[str, Any],
-        customer: Dict[str, Any], 
+        customer: Dict[str, Any],
         product: Dict[str, Any],
         device: Dict[str, Any],
         scenario: str

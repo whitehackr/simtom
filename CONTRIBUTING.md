@@ -164,6 +164,7 @@ When enhancing existing generators:
 - **Add configuration options**: Use Pydantic models for new parameters
 - **Update tests**: Ensure new features are tested
 - **Document changes**: Update docstrings and README
+- **Historical data support**: Consider adding `start_date`/`end_date` support for ML training datasets
 
 ### 3. API Enhancements
 
