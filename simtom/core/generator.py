@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, Optional, List
+from collections import defaultdict
 from enum import Enum
 import asyncio
 import math
@@ -28,8 +29,9 @@ class DriftType(str, Enum):
 
 class GeneratorConfig(BaseModel):
     # Core generation parameters
-    rate_per_second: float = Field(default=1.0, ge=0.1, le=1000.0)
-    total_records: Optional[int] = Field(default=None, ge=1)
+    rate_per_second: Optional[float] = Field(default=None, ge=0.01, le=1000.0, description="Streaming rate (current-date mode)")
+    base_daily_volume: int = Field(default=1000, ge=1, description="Expected daily transaction volume")
+    max_records: Optional[int] = Field(default=None, ge=1, description="Maximum records for current-date streaming (optional)")
 
     # Arrival pattern configuration
     arrival_pattern: ArrivalPattern = Field(default=ArrivalPattern.UNIFORM)
@@ -74,6 +76,23 @@ class GeneratorConfig(BaseModel):
     def validate_partial_date_range(cls, v, values):
         """Ensure we don't have partial date ranges."""
         return v
+
+    @validator('rate_per_second')
+    def validate_current_date_params(cls, v, values):
+        """For current-date mode: prevent conflicting rate specifications."""
+        # If both rate_per_second and base_daily_volume are provided for current-date mode
+        if v is not None and not values.get('start_date'):
+            # This is current-date mode with explicit rate - that's fine
+            pass
+        return v
+
+    def get_effective_rate(self) -> float:
+        """Get the effective streaming rate for current-date mode."""
+        if self.rate_per_second is not None:
+            return self.rate_per_second
+        else:
+            # Convert daily volume to per-second rate (24 hours = 86400 seconds)
+            return self.base_daily_volume / 86400
 
 
 class BaseGenerator(ABC):
@@ -198,9 +217,61 @@ class BaseGenerator(ABC):
         return value
     
     async def stream(self) -> AsyncGenerator[Dict[str, Any], None]:
+        # Check if we're in historical mode with day-per-second delivery
+        if self._is_historical_mode():
+            async for record in self._stream_historical_batched():
+                yield record
+        else:
+            async for record in self._stream_realtime():
+                yield record
+
+    def _is_historical_mode(self) -> bool:
+        """Check if generator is in historical mode (pre-generated timestamps)."""
+        return (hasattr(self, 'use_historical_timestamps') and
+                getattr(self, 'use_historical_timestamps', False))
+
+    async def _stream_historical_batched(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream historical data in day-per-second batches."""
+        if not hasattr(self, '_historical_timestamps'):
+            return
+
+        # Group records by day
+        daily_batches = self._group_timestamps_by_day()
+
+        for day_index, (target_date, day_timestamps) in enumerate(daily_batches.items()):
+            # Generate all records for this day
+            for timestamp in day_timestamps:
+                if (self.config.max_records and
+                    self._records_generated >= self.config.max_records):
+                    return
+
+                # Generate base record
+                record = await self.generate_record()
+
+                # Apply transformations
+                record = await self.apply_noise(record)
+                record = await self.apply_drift(record)
+
+                # Use historical timestamp
+                record["_timestamp"] = timestamp.isoformat()
+                record["_record_id"] = self._records_generated
+                record["_generator"] = self.name
+
+                self._records_generated += 1
+                yield record
+
+            # Wait 1 second before next day (except for last day)
+            # TODO: Make delivery speed configurable (e.g., 5 days per second)
+            # Consider: delivery_days_per_second config parameter with safety caps
+            # Risk: High burst rates (25k+ records/sec) may overwhelm clients/network
+            if day_index < len(daily_batches) - 1:
+                await asyncio.sleep(1.0)
+
+    async def _stream_realtime(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream data in real-time with arrival patterns (current-date mode)."""
         while True:
-            if (self.config.total_records and
-                self._records_generated >= self.config.total_records):
+            if (self.config.max_records and
+                self._records_generated >= self.config.max_records):
                 break
 
             # Generate base record
@@ -226,13 +297,31 @@ class BaseGenerator(ABC):
                 'burst_probability': self.config.burst_probability
             }
 
+            # Apply volume variation to rate for current-date mode
+            base_rate = self.config.get_effective_rate()
+            if hasattr(self, 'get_current_day_rate_multiplier'):
+                effective_rate = base_rate * self.get_current_day_rate_multiplier()
+            else:
+                effective_rate = base_rate
+
             delay = await self.arrival_calculator.next_interval(
                 self.config.arrival_pattern,
-                self.config.rate_per_second,
+                effective_rate,
                 arrival_config
             )
 
             await asyncio.sleep(delay)
+
+    def _group_timestamps_by_day(self) -> Dict[date, List[datetime]]:
+        """Group historical timestamps by day for batched delivery."""
+        daily_batches = defaultdict(list)
+
+        for timestamp in self._historical_timestamps:
+            day = timestamp.date()
+            daily_batches[day].append(timestamp)
+
+        # Return as ordered dict sorted by date
+        return dict(sorted(daily_batches.items()))
 
     def _get_record_timestamp(self) -> datetime:
         """Get timestamp for the current record.
