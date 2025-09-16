@@ -44,7 +44,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Plugin Architecture**: New generators are automatically discovered and registered at startup without code changes to core system.
 
-**Async Streaming**: All data generation uses `AsyncGenerator` for memory-efficient streaming of large datasets with configurable rates (1-1000 records/second).
+**Async Streaming**: All data generation uses `AsyncGenerator` for memory-efficient streaming. Historical mode uses day-per-second delivery (1 days in 1 second). Current-date mode uses configurable rates (1-1000 records/second).
 
 **Configuration as Code**: `GeneratorConfig` uses Pydantic for type-safe validation with clear error messages for invalid parameters.
 
@@ -73,7 +73,7 @@ curl https://simtom-production.up.railway.app/generators
 # Stream live BNPL data (current timestamps)
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
-  -d '{"rate_per_second": 2.0, "total_records": 5, "seed": 42}'
+  -d '{"rate_per_second": 2.0, "max_records": 5, "seed": 42}'
 ```
 
 #### Historical Data Generation (For ML Training)
@@ -84,8 +84,7 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -d '{
     "start_date": "2024-06-01",
     "end_date": "2024-09-01",
-    "rate_per_second": 100,
-    "total_records": 10000,
+    "base_daily_volume": 400,
     "seed": 42,
     "include_holiday_patterns": true
   }'
@@ -96,8 +95,7 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -d '{
     "start_date": "2024-01-01",
     "end_date": "2024-12-31",
-    "rate_per_second": 1000,
-    "total_records": 100000,
+    "base_daily_volume": 1000,
     "seed": 42
   }' > bnpl_2024_data.jsonl
 ```

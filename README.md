@@ -28,7 +28,7 @@ curl https://simtom-production.up.railway.app/generators
 # Stream sample data
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
-  -d '{"rate_per_second": 2.0, "total_records": 3}'
+  -d '{"rate_per_second": 2.0, "max_records": 3}'
 ```
 
 ## ⚡ Key Features
@@ -36,7 +36,8 @@ curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
 - **🎯 Realistic Traffic Patterns**: Uniform, Poisson, NHPP, and Burst arrival patterns
 - **📊 Rich Data Generation**: BNPL transactions with risk scoring and customer profiles
 - **📅 Historical Data Generation**: Generate years of data with realistic temporal patterns
-- **🎄 Holiday & Seasonal Effects**: Black Friday +60%, Christmas +30%, weekend reductions
+- **🎄 Holiday & Seasonal Effects**: Black Friday +60%, Christmas -88%, weekend reductions
+- **⚡ Day-per-Second Delivery**: Historical data streams at 1 day per second (365 days in 6 minutes)
 - **⏱️ Time Compression**: Simulate days/weeks of data in minutes
 - **🔧 Plugin Architecture**: Easy extension with custom generators
 - **📡 Real-time Streaming**: Server-sent events with configurable rates
@@ -54,30 +55,30 @@ curl https://simtom-production.up.railway.app/
 # Stream live BNPL data (current timestamps)
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
-  -d '{"rate_per_second": 2.0, "total_records": 5, "seed": 42}'
+  -d '{"rate_per_second": 2.0, "max_records": 5, "seed": 42}'
 ```
 
 #### Historical Data for ML Training
 ```bash
-# Generate 3 months of historical BNPL data
+# Generate 3 months of historical BNPL data with realistic volumes
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
   -d '{
     "start_date": "2024-06-01",
     "end_date": "2024-09-01",
-    "rate_per_second": 100,
-    "total_records": 10000,
+    "base_daily_volume": 1000,
     "seed": 42
   }' > historical_bnpl_data.jsonl
 
-# Fast generation of full year dataset
+# Fast generation of full year dataset (delivered in ~6 minutes)
 curl -X POST https://simtom-production.up.railway.app/stream/bnpl \
   -H "Content-Type: application/json" \
   -d '{
     "start_date": "2024-01-01",
     "end_date": "2024-12-31",
-    "rate_per_second": 1000,
-    "total_records": 365000
+    "base_daily_volume": 1000,
+    "include_holiday_patterns": true,
+    "seed": 42
   }' > bnpl_full_year.jsonl
 ```
 
@@ -99,7 +100,7 @@ import json
 
 response = requests.post(
     'https://simtom-production.up.railway.app/stream/bnpl',
-    json={"rate_per_second": 10, "total_records": 5},
+    json={"rate_per_second": 10, "max_records": 5},
     stream=True
 )
 
@@ -115,7 +116,7 @@ for line in response.iter_lines(decode_unicode=True):
 fetch('/stream/bnpl', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({rate_per_second: 10, total_records: 5})
+    body: JSON.stringify({rate_per_second: 10, max_records: 5})
 })
 .then(response => response.body.getReader())
 .then(reader => {
@@ -165,7 +166,7 @@ from datetime import date
 # Real-time streaming (current timestamps)
 config = BNPLConfig(
     rate_per_second=10.0,
-    total_records=1000,
+    max_records=1000,
     seed=42
 )
 
@@ -177,14 +178,14 @@ async for record in generator.stream():
 historical_config = BNPLConfig(
     start_date=date(2024, 1, 1),
     end_date=date(2024, 12, 31),
-    rate_per_second=100.0,
-    total_records=50000,
+    base_daily_volume=1000,  # Realistic daily volumes
+    include_holiday_patterns=True,
     seed=42
 )
 
 historical_generator = BNPLGenerator(historical_config)
 async for record in historical_generator.stream():
-    print(record)  # Historical transactions with realistic patterns
+    print(record)  # Historical transactions delivered day-per-second
 ```
 
 ## 📅 Historical Data Generation
@@ -193,27 +194,40 @@ Generate realistic historical datasets with proper temporal patterns for ML trai
 
 ### Key Features
 - **Date Range Support**: Generate data for any period up to 1 year
+- **Statistical Volume Distribution**: 4-factor model (day-of-week, week-of-month, seasonal, events)
 - **Business Hour Patterns**: 70% during 9am-6pm, 20% evenings, 10% nights
 - **Weekend Adjustments**: 15% reduction on weekends (realistic e-commerce patterns)
-- **Holiday Effects**: Configurable traffic spikes for major shopping holidays
+- **Holiday Effects**: Black Friday +60%, Christmas -88%, configurable patterns
+- **Day-per-Second Delivery**: Historical data streams rapidly (1 day per second)
 - **Chronological Ordering**: All timestamps properly sorted for time-series analysis
 
-### Holiday Traffic Multipliers
+### Statistical Volume Multipliers
 ```json
 {
+  // Special Events
   "black_friday": 1.6,        // +60% traffic (biggest shopping day)
   "cyber_monday": 1.4,        // +40% traffic
-  "christmas_shopping": 1.3,  // +30% during Christmas season
+  "christmas_day": 0.12,      // -88% (most stores closed)
+  "new_years_day": 0.3,       // -70% traffic
   "valentines_day": 1.15,     // +15% traffic
   "mothers_day": 1.15,        // +15% traffic
-  "back_to_school": 1.2       // +20% during back-to-school season
+
+  // Day of Week
+  "friday": 1.25,             // +25% (weekend prep)
+  "saturday": 0.85,           // -15% weekend reduction
+  "sunday": 0.70,             // -30% weekend reduction
+
+  // Seasonal
+  "january": 0.75,            // -25% post-holiday low
+  "november": 1.10            // +10% pre-holiday buildup
 }
 ```
 
 ### Performance
-- **Generation Speed**: ~100K records per minute at max rate
-- **No Real-time Delays**: Historical mode generates as fast as possible
-- **Memory Efficient**: Streaming output prevents memory buildup
+- **Historical Mode**: Day-per-second delivery (365 days in ~6 minutes)
+- **Real-time Mode**: Configurable rates 0.1-1000 records/second
+- **Memory Efficient**: O(1) streaming regardless of dataset size
+- **Network Optimized**: Batched delivery prevents overwhelming clients
 
 ## 🚦 Arrival Patterns
 
@@ -352,18 +366,17 @@ config = GeneratorConfig(
 
 ### Configuration Options
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `rate_per_second` | Arrival rate (0.1-1000) | 1.0 |
-| `arrival_pattern` | Traffic pattern | "uniform" |
-| `peak_hours` | NHPP peak hours | [12, 19] |
-| `burst_intensity` | Burst multiplier | 2.0 |
-| `burst_probability` | Burst occurrence probability | 0.3 |
-| `time_compression` | Time acceleration | 1.0 |
-| `noise_type` | Data quality | "none" |
-| `drift_type` | Model drift | "none" |
-| `seed` | Deterministic output | null |
-| `total_records` | Maximum records to generate | null |
+| Parameter | Description | Default | Mode |
+|-----------|-------------|---------|------|
+| `rate_per_second` | Arrival rate (0.1-1000) | 1.0 | Current-date |
+| `base_daily_volume` | Average daily transactions | 1000 | Historical |
+| `start_date` | Historical start date | null | Historical |
+| `end_date` | Historical end date | null | Historical |
+| `include_holiday_patterns` | Enable seasonal effects | true | Both |
+| `arrival_pattern` | Traffic pattern | "uniform" | Current-date |
+| `peak_hours` | NHPP peak hours | [12, 19] | Current-date |
+| `max_records` | Maximum records to generate | null | Both |
+| `seed` | Deterministic output | null | Both |
 
 ### Environment Variables
 
