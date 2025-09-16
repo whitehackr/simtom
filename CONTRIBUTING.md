@@ -118,7 +118,7 @@ from simtom.generators.finance.credit_cards import CreditCardGenerator
 
 @pytest.mark.asyncio
 async def test_credit_card_generation():
-    config = GeneratorConfig(total_records=10, seed=42)
+    config = GeneratorConfig(max_records=10, seed=42)
     generator = CreditCardGenerator(config)
 
     records = []
@@ -132,7 +132,7 @@ async def test_credit_card_generation():
 
 @pytest.mark.asyncio
 async def test_credit_card_reproducibility():
-    config = GeneratorConfig(total_records=5, seed=42)
+    config = GeneratorConfig(max_records=5, seed=42)
 
     # Generate twice with same seed
     gen1 = CreditCardGenerator(config)
@@ -197,7 +197,7 @@ tests/
 1. **Test Reproducibility**
    ```python
    # Always test that same seed produces same results
-   config = GeneratorConfig(seed=42, total_records=10)
+   config = GeneratorConfig(seed=42, max_records=10)
    gen1 = MyGenerator(config)
    gen2 = MyGenerator(config)
 
@@ -227,13 +227,13 @@ tests/
    # Test boundary conditions
    async def test_edge_cases():
        # Zero records
-       config = GeneratorConfig(total_records=0)
+       config = GeneratorConfig(max_records=0)
        generator = MyGenerator(config)
        records = [r async for r in generator.stream()]
        assert len(records) == 0
 
        # High rate
-       config = GeneratorConfig(rate_per_second=1000, total_records=10)
+       config = GeneratorConfig(rate_per_second=1000, max_records=10)
        # Should not crash or timeout
    ```
 

@@ -113,10 +113,9 @@ class BaseEcommerceGenerator(BaseGenerator):
             require_bnpl=use_bnpl
         )
         
-        # Base transaction data
+        # Base transaction data (timestamp will be added later by specific generators)
         transaction = {
             "transaction_id": f"txn_{self._records_generated:08d}",
-            "timestamp": datetime.utcnow(),
             "customer_id": customer["customer_id"],
             "product_id": product["product_id"],
             "device_id": device["device_id"],

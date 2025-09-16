@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta, date, time
 import random
+import numpy as np
 from enum import Enum
 
 from .base import BaseEcommerceGenerator, BaseEcommerceConfig
@@ -34,20 +35,8 @@ class BNPLConfig(BaseEcommerceConfig):
     base_default_rate: float = 0.03     # 3% base default rate
     seasonal_multiplier: float = 1.2    # Higher defaults post-holidays
 
-    # E-commerce specific holiday multipliers (realistic increases)
-    holiday_multipliers: Dict[str, float] = {
-        'black_friday': 1.6,        # +60% (biggest shopping day)
-        'cyber_monday': 1.4,        # +40%
-        'black_friday_week': 1.3,   # +30% for the week
-        'christmas_shopping': 1.3,  # +30% for Christmas season
-        'christmas_eve': 1.2,       # +20%
-        'post_christmas': 1.25,     # +25% (sales/returns)
-        'valentines_day': 1.15,     # +15%
-        'mothers_day': 1.15,        # +15%
-        'fathers_day': 1.1,         # +10%
-        'back_to_school': 1.2,      # +20%
-        'halloween': 1.1,           # +10%
-    }
+    # Volume distribution parameters
+    volume_variation_enabled: bool = True  # Enable statistical volume distribution
 
 
 @register_generator("bnpl")
@@ -91,12 +80,14 @@ class BNPLGenerator(BaseEcommerceGenerator):
         
         # Add risk indicators
         transaction = self._add_risk_indicators(transaction, customer, product, device, scenario)
-        
+
+        # Timestamp is automatically handled by core generator via _get_record_timestamp()
+
         # Denormalize if configured
         final_record = self.denormalize_transaction(
             transaction, customer, product, device, payment_method
         )
-        
+
         return final_record
     
     def _apply_bnpl_scenario(
@@ -135,68 +126,191 @@ class BNPLGenerator(BaseEcommerceGenerator):
         return transaction
 
     def _generate_historical_timestamps(self) -> List[datetime]:
-        """Generate realistic historical timestamps distributed across date range."""
+        """Generate realistic historical timestamps with statistical volume distribution."""
         if not self.use_historical_timestamps:
             return []
 
-        total_records = self.config.total_records or 100
+        if self.bnpl_config.volume_variation_enabled:
+            return self._generate_volume_aware_timestamps()
+        else:
+            return self._generate_uniform_timestamps()
+
+    def _generate_volume_aware_timestamps(self) -> List[datetime]:
+        """Generate timestamps using 4-factor statistical volume model."""
+        timestamps = []
+        current_date = self.bnpl_config.start_date
+        base_volume = self.config.base_daily_volume
+
+        while current_date <= self.bnpl_config.end_date:
+            daily_volume = self._calculate_statistical_daily_volume(base_volume, current_date)
+
+            # Generate timestamps for this day
+            for _ in range(daily_volume):
+                timestamp = self._generate_simple_datetime(current_date)
+                timestamps.append(timestamp)
+
+            current_date += timedelta(days=1)
+
+        return sorted(timestamps)
+
+    def _generate_uniform_timestamps(self) -> List[datetime]:
+        """Legacy uniform distribution for backward compatibility."""
         start_date = self.bnpl_config.start_date
         end_date = self.bnpl_config.end_date
-
-        timestamps = []
         total_days = (end_date - start_date).days + 1
 
+        # Use max_records if specified, otherwise use base_daily_volume
+        if self.config.max_records is not None:
+            total_records = self.config.max_records
+        else:
+            total_records = self.config.base_daily_volume * total_days
+
+        timestamps = []
         for i in range(total_records):
             # Distribute records evenly across the date range
             day_progress = i / total_records
             day_offset = int(day_progress * total_days)
             target_date = start_date + timedelta(days=day_offset)
 
-            # Generate realistic time with business patterns and holiday effects
-            timestamp = self._generate_realistic_datetime(target_date)
+            # Generate realistic time with business patterns
+            timestamp = self._generate_simple_datetime(target_date)
             timestamps.append(timestamp)
 
-        # Sort chronologically for realistic data flow
-        timestamps.sort()
-        return timestamps
+        return sorted(timestamps)
 
-    def _generate_realistic_datetime(self, target_date: date) -> datetime:
-        """Generate realistic datetime for a specific date with business patterns."""
-        # Get traffic multiplier for holiday effects
-        traffic_multiplier = self._get_traffic_multiplier_for_date(target_date)
+    def _calculate_statistical_daily_volume(self, base_volume: int, target_date: date) -> int:
+        """Calculate daily volume using 4-factor statistical model."""
+        # Set deterministic seed for reproducible results
+        random.seed(self.config.seed + target_date.toordinal() if self.config.seed else None)
+        np.random.seed(self.config.seed + target_date.toordinal() if self.config.seed else None)
 
-        # Apply weekend reduction
-        if is_weekend(target_date):
-            traffic_multiplier *= self.config.weekend_multiplier
+        # Factor 1: Day of Week Effect
+        dow_multiplier = self._get_day_of_week_multiplier(target_date)
 
+        # Factor 2: Week of Month Effect (paycheck cycles)
+        wom_multiplier = self._get_week_of_month_multiplier(target_date)
+
+        # Factor 3: Month of Year Effect (seasonality)
+        moy_multiplier = self._get_month_of_year_multiplier(target_date)
+
+        # Factor 4: Special Events Effect
+        event_multiplier = self._get_special_event_multiplier(target_date)
+
+        # Apply multiplicative model
+        total_multiplier = dow_multiplier * wom_multiplier * moy_multiplier * event_multiplier
+
+        # Add realistic daily noise (log-normal distribution)
+        noise_factor = np.random.lognormal(mean=0, sigma=0.1)  # ±10% daily variation
+
+        final_volume = int(base_volume * total_multiplier * noise_factor)
+        return max(1, final_volume)  # Minimum 1 transaction per day
+
+    def _get_day_of_week_multiplier(self, date_obj: date) -> float:
+        """E-commerce patterns based on industry data."""
+        multipliers = {
+            0: 1.15,  # Monday (post-weekend shopping)
+            1: 1.10,  # Tuesday
+            2: 1.05,  # Wednesday
+            3: 1.10,  # Thursday
+            4: 1.25,  # Friday (weekend prep)
+            5: 0.85,  # Saturday (weekend low)
+            6: 0.70   # Sunday (weekend low)
+        }
+        return multipliers[date_obj.weekday()]
+
+    def _get_week_of_month_multiplier(self, date_obj: date) -> float:
+        """Paycheck cycle effects (1st/3rd weeks higher)."""
+        day_of_month = date_obj.day
+
+        if day_of_month <= 7:      # Week 1 (payday effect)
+            return 1.15
+        elif day_of_month <= 14:   # Week 2
+            return 0.95
+        elif day_of_month <= 21:   # Week 3 (mid-month payday)
+            return 1.10
+        else:                      # Week 4 (pre-payday low)
+            return 0.90
+
+    def _get_month_of_year_multiplier(self, date_obj: date) -> float:
+        """Conservative seasonal patterns (special events handled separately)."""
+        month_multipliers = {
+             1: 0.75,  # January (post-holiday low)
+             2: 0.85,  # February
+             3: 0.95,  # March
+             4: 1.00,  # April (baseline)
+             5: 1.00,  # May
+             6: 1.05,  # June (summer start)
+             7: 1.05,  # July
+             8: 1.05,  # August (back-to-school baseline)
+             9: 1.00,  # September
+            10: 1.05,  # October (mild pre-holiday)
+            11: 1.10,  # November (mild increase, events handle spikes)
+            12: 1.20   # December (general holiday season, not specific events)
+        }
+        return month_multipliers[date_obj.month]
+
+    def _get_special_event_multiplier(self, date_obj: date) -> float:
+        """Realistic event effects (conservative multipliers)."""
+        active_holidays = get_active_holidays(date_obj)
+
+        if not active_holidays:
+            return 1.0
+
+        # Conservative, realistic multipliers - covers all holidays from holidays.py
+        event_multipliers = {
+            # Major shopping events
+            'black_friday': 1.6,        # +60% (your spec)
+            'cyber_monday': 1.4,        # +40% (your spec)
+
+            # Major holidays (most businesses closed)
+            'christmas_day': 0.1,       # Nearly everything closed
+            'christmas_eve': 0.3,       # Most stores closed
+            'new_years_day': 0.2,       # Holiday low
+            'new_years_eve': 0.4,       # Early closures
+            'thanksgiving': 0.2,        # Most closed
+
+            # Shopping holidays
+            'valentines_day': 1.15,     # +15%
+            'mothers_day': 1.2,         # +20%
+            'fathers_day': 1.1,         # +10%
+            'halloween': 1.05,          # +5%
+
+            # Regular holidays (reduced activity)
+            'labor_day': 1.05,          # +5%
+            'independence_day': 0.8,    # Reduced activity
+
+            # Holiday periods
+            'year_end_holidays': 0.5,   # General holiday period
+            'christmas_shopping': 1.2,  # Shopping season
+            'post_christmas': 1.3,      # Returns/sales
+            'black_friday_week': 1.3,   # Extended shopping week
+            'valentines_week': 1.1,     # Valentine shopping
+            'mothers_day_week': 1.15,   # Mother's Day shopping
+            'back_to_school': 1.2,      # Back-to-school shopping
+            'summer_holidays': 1.0,     # Neutral
+        }
+
+        # Apply the most restrictive multiplier for suppressive effects,
+        # most generous for boosting effects
+        multipliers = [event_multipliers.get(holiday, 1.0) for holiday in active_holidays]
+
+        # If any suppressive effects (< 1.0), use the minimum (most restrictive)
+        # If only boosting effects (> 1.0), use the maximum (most generous)
+        suppressive = [m for m in multipliers if m < 1.0]
+        if suppressive:
+            return min(suppressive)
+        else:
+            return max(multipliers)
+
+    def _generate_simple_datetime(self, target_date: date) -> datetime:
+        """Generate realistic datetime with business hour patterns."""
         # Generate time of day with business hour weighting
         hour = self._generate_business_hour()
         minute = random.randint(0, 59)
         second = random.randint(0, 59)
 
-        # Create datetime
-        dt = datetime.combine(target_date, time(hour, minute, second))
+        return datetime.combine(target_date, time(hour, minute, second))
 
-        # Store traffic multiplier for potential use in risk calculations
-        # (This could influence transaction amounts, risk scores, etc.)
-
-        return dt
-
-    def _get_traffic_multiplier_for_date(self, target_date: date) -> float:
-        """Get traffic multiplier for a specific date based on holidays."""
-        if not self.config.include_holiday_patterns:
-            return 1.0
-
-        active_holidays = get_active_holidays(target_date)
-
-        # Find the highest multiplier from active holidays
-        max_multiplier = 1.0
-        for holiday in active_holidays:
-            if holiday in self.bnpl_config.holiday_multipliers:
-                multiplier = self.bnpl_config.holiday_multipliers[holiday]
-                max_multiplier = max(max_multiplier, multiplier)
-
-        return max_multiplier
 
     def _generate_business_hour(self) -> int:
         """Generate hour of day with realistic business patterns.
@@ -226,6 +340,33 @@ class BNPLGenerator(BaseEcommerceGenerator):
         timestamp = self._historical_timestamps[self._timestamp_index]
         self._timestamp_index += 1
         return timestamp
+
+    def get_current_day_rate_multiplier(self) -> float:
+        """Get rate multiplier for current day (current-date mode only)."""
+        # Historical mode should NOT use current-day multipliers during streaming
+        # as it has pre-generated timestamps with volumes already calculated
+        if self.use_historical_timestamps:
+            return 1.0
+
+        if not self.bnpl_config.volume_variation_enabled:
+            return 1.0
+
+        today = datetime.utcnow().date()
+
+        # Set deterministic seed for reproducible daily noise
+        np.random.seed(self.config.seed + today.toordinal() if self.config.seed else None)
+
+        # Reuse existing 4-factor calculation
+        dow_mult = self._get_day_of_week_multiplier(today)
+        wom_mult = self._get_week_of_month_multiplier(today)
+        moy_mult = self._get_month_of_year_multiplier(today)
+        event_mult = self._get_special_event_multiplier(today)
+
+        # Add realistic daily noise (same as historical mode)
+        noise_factor = np.random.lognormal(mean=0, sigma=0.1)  # ±10% daily variation
+
+        return dow_mult * wom_mult * moy_mult * event_mult * noise_factor
+
 
     def _add_risk_indicators(
         self,
