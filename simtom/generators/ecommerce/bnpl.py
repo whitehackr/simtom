@@ -388,9 +388,11 @@ class BNPLGenerator(BaseEcommerceGenerator):
             "payment_frequency": "bi_weekly",  # Most common
             
             # Behavioral indicators
+            "purchase_context": transaction.get("purchase_context", "normal"),
             "checkout_speed": self._checkout_speed_for_scenario(scenario),
             "cart_abandonment_count": random.randint(0, 3),
             "price_comparison_time": self._price_comparison_time(scenario),
+            "time_on_site_seconds": transaction.get("time_on_site_seconds", self._time_on_site_for_scenario(scenario)),
             
             # Economic context
             "economic_stress_factor": self.bnpl_config.economic_stress_factor,
@@ -499,6 +501,17 @@ class BNPLGenerator(BaseEcommerceGenerator):
             return random.randint(0, 30)
         else:
             return random.randint(60, 300)
+
+    def _time_on_site_for_scenario(self, scenario: str) -> int:
+        """Total time spent on site before purchase (seconds)."""
+        if scenario == "high_risk_behavior":
+            return random.randint(30, 120)  # Very quick
+        elif scenario == "impulse_purchase":
+            return random.randint(120, 300)  # Quick decision
+        elif scenario == "credit_stretched":
+            return random.randint(300, 600)  # More deliberation
+        else:
+            return random.randint(180, 900)  # Normal browsing
     
     def _simulate_default(self, risk_score: float) -> bool:
         """Simulate whether transaction will default based on risk score."""

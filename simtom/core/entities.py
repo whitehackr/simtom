@@ -183,15 +183,30 @@ class DeviceRegistry(EntityRegistry):
         super().__init__(max_entities, seed)
         
         self.device_types = ["mobile", "desktop", "tablet"]
+        self.device_type_weights = [55, 30, 15]  # Realistic e-commerce distribution
         self.operating_systems = {
             "mobile": ["iOS", "Android"],
             "desktop": ["Windows", "macOS", "Linux"],
             "tablet": ["iOS", "Android", "Windows"]
         }
+        self.os_weights = {
+            "mobile": [30, 70],  # iOS 30%, Android 70%
+            "desktop": [70, 20, 10],  # Windows 70%, macOS 20%, Linux 10%
+            "tablet": [50, 45, 5]  # iOS 50%, Android 45%, Windows 5%
+        }
     
     def _generate_entity(self, device_id: str) -> Dict[str, Any]:
-        device_type = random.choice(self.device_types)
+        # Realistic device type distribution
+        device_type = random.choices(
+            self.device_types,
+            weights=self.device_type_weights,
+            k=1
+        )[0]
+
+        # Realistic OS distribution by device type
         os_options = self.operating_systems[device_type]
+        os_weights = self.os_weights[device_type]
+        os = random.choices(os_options, weights=os_weights, k=1)[0]
         
         # Trust based on device age (older = more trusted)
         first_seen = self.fake.date_between(start_date="-2y", end_date="today")
@@ -201,7 +216,7 @@ class DeviceRegistry(EntityRegistry):
         return {
             "device_id": device_id,
             "type": device_type,
-            "os": random.choice(os_options),
+            "os": os,
             "is_trusted": is_trusted,
             "first_seen": first_seen
         }
