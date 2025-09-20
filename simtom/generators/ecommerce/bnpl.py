@@ -403,7 +403,9 @@ class BNPLGenerator(BaseEcommerceGenerator):
         
         # Add days_to_missed_payment after will_default is set
         if transaction["will_default"]:
-            transaction["days_to_first_missed_payment"] = self._days_to_missed_payment(risk_score)
+            transaction["days_to_first_missed_payment"] = self._days_to_missed_payment(
+                risk_score, transaction["installment_count"]
+            )
         else:
             transaction["days_to_first_missed_payment"] = None
         
@@ -565,9 +567,65 @@ class BNPLGenerator(BaseEcommerceGenerator):
         # Bound to realistic range [0.1%, 25%]
         return max(0.001, min(0.25, actual_rate))
     
-    def _days_to_missed_payment(self, risk_score: float) -> int:
-        """Simulate days until first missed payment."""
-        # Higher risk = faster default
-        base_days = 45  # Typical first payment cycle
-        risk_factor = risk_score * 30
-        return max(7, int(base_days - risk_factor + random.randint(-10, 10)))
+    def _days_to_missed_payment(self, risk_score: float, installment_count: int) -> int:
+        """Simulate days until first missed payment using payment period model."""
+
+        # Payment periods: 1 through installment_count (bi-weekly payments)
+        possible_periods = list(range(1, installment_count + 1))
+
+        # Universal temporal risk pattern (same shape for all risk levels)
+        base_pattern = self._create_universal_risk_pattern(len(possible_periods))
+
+        # Risk score scales the entire pattern (higher risk = higher at all periods)
+        risk_multiplier = 0.5 + (risk_score * 1.5)  # Range: 0.5x to 2.0x
+        scaled_weights = [weight * risk_multiplier for weight in base_pattern]
+
+        # Normalize to valid probabilities
+        total_weight = sum(scaled_weights)
+        if total_weight <= 0:  # Defensive check
+            # Fallback to uniform distribution
+            final_weights = [1.0 / len(possible_periods)] * len(possible_periods)
+        else:
+            final_weights = [w / total_weight for w in scaled_weights]
+
+        # Choose payment period
+        chosen_period = random.choices(possible_periods, weights=final_weights)[0]
+
+        # Convert to days: period × 14 (bi-weekly)
+        days = chosen_period * 14
+
+        # ROBUSTNESS CHECK: Ensure always >= 14 when will_default = TRUE
+        if days < 14:
+            days = 14  # Force minimum valid value
+
+        return days
+
+    def _create_universal_risk_pattern(self, num_periods: int) -> list:
+        """Create universal temporal risk pattern: low early, peak middle, decline late."""
+        if num_periods <= 0:
+            return [1.0]  # Defensive fallback
+
+        if num_periods == 1:
+            return [1.0]
+        elif num_periods == 2:
+            return [0.3, 0.7]  # Slightly higher risk in second period
+        elif num_periods <= 4:
+            # Short loans: gradual increase then decline
+            return [0.2, 0.4, 0.3, 0.1][:num_periods]
+        else:
+            # Longer loans: more realistic curve
+            pattern = []
+            for i in range(num_periods):
+                # Create bell-curve-like pattern peaked around middle periods
+                position = i / (num_periods - 1)  # 0.0 to 1.0
+
+                # Bell curve: low at ends, high in middle
+                # Using simple quadratic approximation of bell curve
+                if position <= 0.5:
+                    risk_level = 0.1 + (position * 1.6)  # Rise from 0.1 to 0.9
+                else:
+                    risk_level = 0.9 - ((position - 0.5) * 1.6)  # Fall from 0.9 to 0.1
+
+                pattern.append(max(0.05, risk_level))  # Minimum 5% weight
+
+            return pattern

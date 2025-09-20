@@ -78,8 +78,8 @@ This guide explains the business context and data generation logic for each fiel
 
 | Field | Type | Business Context |
 |-------|------|------------------|
-| `will_default` | boolean | **Historical outcome**: Whether this transaction actually defaulted (determined months after the transaction). Uses two-level statistical model: (1) Population-level default rates via Beta distribution (0.5%-20% range), (2) Individual variation via normal noise representing unobservable factors (job loss, medical emergencies). NOT a simple function of risk_score - creates realistic ML learning challenge. |
-| `days_to_first_missed_payment` | int/null | Days until first missed payment occurs (null if no default). Useful for time-to-event modeling and early intervention systems. |
+| `will_default` | boolean | **Historical outcome**: Whether this transaction actually defaulted (determined months after the transaction). Uses two-level statistical model: (1) Population-level default rates via Beta distribution (0.5%-20% range), (2) Individual variation via normal noise representing unobservable factors (job loss, medical emergencies). NOT a simple function of risk_score - creates realistic ML learning challenge. **⚠️ WARNING**: This field represents historical knowledge and should be ignored when generating current-date data for real-time decisions. |
+| `days_to_first_missed_payment` | int/null | Days until first missed payment occurs (null if no default). Uses payment period model: defaults occur at bi-weekly intervals (14, 28, 42 days, etc.) with risk-scaled probabilities following universal temporal pattern (low early, peak middle, decline late). Range: [14, 14×installment_count] when default occurs. **⚠️ WARNING**: Historical outcome field - ignore for current-date transactions. |
 
 ## Key Business Insights
 
