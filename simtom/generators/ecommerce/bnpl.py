@@ -104,22 +104,16 @@ class BNPLGenerator(BaseEcommerceGenerator):
             pass
             
         elif scenario == "impulse_purchase":
-            # Higher amount, electronics/luxury categories
-            if product["category"] in ["electronics", "clothing"]:
-                # Bump up price by 20-50%
-                multiplier = random.uniform(1.2, 1.5)
-                transaction["amount"] = round(product["price"] * multiplier, 2)
-                transaction["purchase_context"] = "impulse"
+            # Impulse behavior indicators (amount stays = product price)
+            transaction["purchase_context"] = "impulse"
             
         elif scenario == "credit_stretched":
-            # Transaction near customer's credit limit
+            # Credit utilization indicators (amount stays = product price)
             credit_limit = random.choice([500, 1000, 1500])  # Typical BNPL limits
-            transaction["amount"] = round(credit_limit * random.uniform(0.8, 0.95), 2)
             transaction["credit_utilization"] = transaction["amount"] / credit_limit
             
         elif scenario == "high_risk_behavior":
-            # Multiple risk flags
-            transaction["amount"] = round(product["price"] * random.uniform(1.3, 2.0), 2)
+            # High risk behavior indicators (amount stays = product price)
             transaction["purchase_context"] = "rushed"
             transaction["time_on_site_seconds"] = random.randint(30, 120)  # Very quick
         
@@ -414,46 +408,51 @@ class BNPLGenerator(BaseEcommerceGenerator):
         return transaction
     
     def _calculate_risk_score(
-        self, 
-        customer: Dict[str, Any], 
-        product: Dict[str, Any], 
+        self,
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
         device: Dict[str, Any],
         scenario: str
     ) -> float:
-        """Calculate risk score based on multiple factors."""
-        
-        score = 0.0
-        
-        # Customer risk factors
-        credit_scores = {"excellent": 0.1, "good": 0.3, "fair": 0.6, "poor": 0.9}
-        score += credit_scores.get(customer["credit_score_range"], 0.5)
-        
-        verification_scores = {"verified": 0.1, "partial": 0.4, "unverified": 0.8}
-        score += verification_scores.get(customer["verification_level"], 0.5)
-        
-        income_scores = {"100k+": 0.1, "75k-100k": 0.2, "50k-75k": 0.3, "25k-50k": 0.6, "<25k": 0.8}
-        score += income_scores.get(customer["income_bracket"], 0.5)
-        
-        # Device trust
-        if not device["is_trusted"]:
-            score += 0.3
-        
-        # Product risk
-        product_risk_scores = {"low": 0.1, "medium": 0.3, "high": 0.6}
-        score += product_risk_scores.get(product["risk_category"], 0.3)
-        
-        # Scenario risk
-        scenario_scores = {
-            "low_risk_purchase": 0.0,
-            "impulse_purchase": 0.3, 
-            "credit_stretched": 0.6,
+        """Calculate risk score using weighted average for natural distribution."""
+
+        # Individual risk factors (0.0 to 1.0 each)
+        credit_risk = {"excellent": 0.1, "good": 0.3, "fair": 0.6, "poor": 0.9}.get(
+            customer["credit_score_range"], 0.5)
+
+        verification_risk = {"verified": 0.1, "partial": 0.4, "unverified": 0.8}.get(
+            customer["verification_level"], 0.5)
+
+        income_risk = {"100k+": 0.1, "75k-100k": 0.2, "50k-75k": 0.3, "25k-50k": 0.6, "<25k": 0.8}.get(
+            customer["income_bracket"], 0.5)
+
+        device_risk = 0.7 if not device["is_trusted"] else 0.2
+
+        product_risk = {"low": 0.1, "medium": 0.3, "high": 0.6}.get(
+            product["risk_category"], 0.3)
+
+        scenario_risk = {
+            "low_risk_purchase": 0.1,
+            "impulse_purchase": 0.4,
+            "credit_stretched": 0.7,
             "high_risk_behavior": 0.9
-        }
-        score += scenario_scores.get(scenario, 0.0)
-        
-        # Economic stress multiplier
-        score *= (1 + self.bnpl_config.economic_stress_factor * 0.5)
-        
+        }.get(scenario, 0.3)
+
+        # Weighted average (naturally distributes 0.0-1.0)
+        risk_factors = [
+            (credit_risk, 0.3),      # 30% weight - most important
+            (verification_risk, 0.2), # 20% weight
+            (income_risk, 0.2),      # 20% weight
+            (device_risk, 0.1),      # 10% weight
+            (product_risk, 0.1),     # 10% weight
+            (scenario_risk, 0.1)     # 10% weight
+        ]
+
+        score = sum(risk * weight for risk, weight in risk_factors)
+
+        # Economic stress multiplier (mild adjustment)
+        score *= (1 + self.bnpl_config.economic_stress_factor * 0.2)
+
         return min(score, 1.0)  # Cap at 1.0
     
     def _risk_level_from_score(self, risk_score: float) -> str:

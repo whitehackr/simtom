@@ -68,8 +68,12 @@ class CustomerRegistry(EntityRegistry):
             "dob": self.fake.date_of_birth(minimum_age=18, maximum_age=70),
             "signup_date": signup_date,
             
-            # Risk demographics
-            "income_bracket": random.choice(self.income_brackets),
+            # Risk demographics (realistic US Census-based distribution)
+            "income_bracket": random.choices(
+                self.income_brackets,
+                weights=[15, 28, 23, 18, 16],  # <25k, 25k-50k, 50k-75k, 75k-100k, 100k+
+                k=1
+            )[0],
             "employment_status": random.choice(self.employment_statuses),
             "credit_score_range": random.choices(
                 self.credit_score_ranges, 
@@ -109,20 +113,25 @@ class ProductRegistry(EntityRegistry):
             "sports": ["fitness", "outdoor", "team_sports", "athletic_wear"]
         }
         
-        # Price ranges by category (BNPL eligibility often price-dependent)
+        # Price ranges by category (BNPL-appropriate ranges for realistic AOV)
         self.category_price_ranges = {
-            "electronics": (50, 3000),
-            "clothing": (25, 500),
-            "home": (100, 2000),
-            "beauty": (15, 300),
-            "sports": (30, 800)
+            "electronics": (30, 400),     # Phones, tablets, headphones (not laptops)
+            "clothing": (20, 150),        # Fashion items, shoes, accessories
+            "home": (25, 300),            # Home accessories, small appliances
+            "beauty": (15, 80),           # Skincare, makeup, tools
+            "sports": (25, 200)           # Athletic wear, equipment
         }
         
         self.brands = ["Apple", "Samsung", "Nike", "Adidas", "IKEA", "Sephora", "Zara", "H&M"]
         self.risk_categories = ["low", "medium", "high"]
     
     def _generate_entity(self, product_id: str) -> Dict[str, Any]:
-        category = random.choice(list(self.categories.keys()))
+        # Realistic e-commerce category distribution
+        category = random.choices(
+            list(self.categories.keys()),
+            weights=[35, 25, 20, 12, 8],  # electronics, clothing, home, beauty, sports
+            k=1
+        )[0]
         subcategory = random.choice(self.categories[category])
         min_price, max_price = self.category_price_ranges[category]
         price = round(random.uniform(min_price, max_price), 2)
