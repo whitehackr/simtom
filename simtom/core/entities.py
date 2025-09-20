@@ -68,8 +68,12 @@ class CustomerRegistry(EntityRegistry):
             "dob": self.fake.date_of_birth(minimum_age=18, maximum_age=70),
             "signup_date": signup_date,
             
-            # Risk demographics
-            "income_bracket": random.choice(self.income_brackets),
+            # Risk demographics (realistic US Census-based distribution)
+            "income_bracket": random.choices(
+                self.income_brackets,
+                weights=[15, 28, 23, 18, 16],  # <25k, 25k-50k, 50k-75k, 75k-100k, 100k+
+                k=1
+            )[0],
             "employment_status": random.choice(self.employment_statuses),
             "credit_score_range": random.choices(
                 self.credit_score_ranges, 
@@ -109,20 +113,25 @@ class ProductRegistry(EntityRegistry):
             "sports": ["fitness", "outdoor", "team_sports", "athletic_wear"]
         }
         
-        # Price ranges by category (BNPL eligibility often price-dependent)
+        # Price ranges by category (BNPL-appropriate ranges for realistic AOV)
         self.category_price_ranges = {
-            "electronics": (50, 3000),
-            "clothing": (25, 500),
-            "home": (100, 2000),
-            "beauty": (15, 300),
-            "sports": (30, 800)
+            "electronics": (30, 400),     # Phones, tablets, headphones (not laptops)
+            "clothing": (20, 150),        # Fashion items, shoes, accessories
+            "home": (25, 300),            # Home accessories, small appliances
+            "beauty": (15, 80),           # Skincare, makeup, tools
+            "sports": (25, 200)           # Athletic wear, equipment
         }
         
         self.brands = ["Apple", "Samsung", "Nike", "Adidas", "IKEA", "Sephora", "Zara", "H&M"]
         self.risk_categories = ["low", "medium", "high"]
     
     def _generate_entity(self, product_id: str) -> Dict[str, Any]:
-        category = random.choice(list(self.categories.keys()))
+        # Realistic e-commerce category distribution
+        category = random.choices(
+            list(self.categories.keys()),
+            weights=[35, 25, 20, 12, 8],  # electronics, clothing, home, beauty, sports
+            k=1
+        )[0]
         subcategory = random.choice(self.categories[category])
         min_price, max_price = self.category_price_ranges[category]
         price = round(random.uniform(min_price, max_price), 2)
@@ -174,15 +183,30 @@ class DeviceRegistry(EntityRegistry):
         super().__init__(max_entities, seed)
         
         self.device_types = ["mobile", "desktop", "tablet"]
+        self.device_type_weights = [55, 30, 15]  # Realistic e-commerce distribution
         self.operating_systems = {
             "mobile": ["iOS", "Android"],
             "desktop": ["Windows", "macOS", "Linux"],
             "tablet": ["iOS", "Android", "Windows"]
         }
+        self.os_weights = {
+            "mobile": [30, 70],  # iOS 30%, Android 70%
+            "desktop": [70, 20, 10],  # Windows 70%, macOS 20%, Linux 10%
+            "tablet": [50, 45, 5]  # iOS 50%, Android 45%, Windows 5%
+        }
     
     def _generate_entity(self, device_id: str) -> Dict[str, Any]:
-        device_type = random.choice(self.device_types)
+        # Realistic device type distribution
+        device_type = random.choices(
+            self.device_types,
+            weights=self.device_type_weights,
+            k=1
+        )[0]
+
+        # Realistic OS distribution by device type
         os_options = self.operating_systems[device_type]
+        os_weights = self.os_weights[device_type]
+        os = random.choices(os_options, weights=os_weights, k=1)[0]
         
         # Trust based on device age (older = more trusted)
         first_seen = self.fake.date_between(start_date="-2y", end_date="today")
@@ -192,7 +216,7 @@ class DeviceRegistry(EntityRegistry):
         return {
             "device_id": device_id,
             "type": device_type,
-            "os": random.choice(os_options),
+            "os": os,
             "is_trusted": is_trusted,
             "first_seen": first_seen
         }

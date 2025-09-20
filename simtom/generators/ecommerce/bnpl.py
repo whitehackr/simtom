@@ -104,22 +104,16 @@ class BNPLGenerator(BaseEcommerceGenerator):
             pass
             
         elif scenario == "impulse_purchase":
-            # Higher amount, electronics/luxury categories
-            if product["category"] in ["electronics", "clothing"]:
-                # Bump up price by 20-50%
-                multiplier = random.uniform(1.2, 1.5)
-                transaction["amount"] = round(product["price"] * multiplier, 2)
-                transaction["purchase_context"] = "impulse"
+            # Impulse behavior indicators (amount stays = product price)
+            transaction["purchase_context"] = "impulse"
             
         elif scenario == "credit_stretched":
-            # Transaction near customer's credit limit
+            # Credit utilization indicators (amount stays = product price)
             credit_limit = random.choice([500, 1000, 1500])  # Typical BNPL limits
-            transaction["amount"] = round(credit_limit * random.uniform(0.8, 0.95), 2)
             transaction["credit_utilization"] = transaction["amount"] / credit_limit
             
         elif scenario == "high_risk_behavior":
-            # Multiple risk flags
-            transaction["amount"] = round(product["price"] * random.uniform(1.3, 2.0), 2)
+            # High risk behavior indicators (amount stays = product price)
             transaction["purchase_context"] = "rushed"
             transaction["time_on_site_seconds"] = random.randint(30, 120)  # Very quick
         
@@ -394,9 +388,11 @@ class BNPLGenerator(BaseEcommerceGenerator):
             "payment_frequency": "bi_weekly",  # Most common
             
             # Behavioral indicators
+            "purchase_context": transaction.get("purchase_context", "normal"),
             "checkout_speed": self._checkout_speed_for_scenario(scenario),
             "cart_abandonment_count": random.randint(0, 3),
             "price_comparison_time": self._price_comparison_time(scenario),
+            "time_on_site_seconds": transaction.get("time_on_site_seconds", self._time_on_site_for_scenario(scenario)),
             
             # Economic context
             "economic_stress_factor": self.bnpl_config.economic_stress_factor,
@@ -407,53 +403,60 @@ class BNPLGenerator(BaseEcommerceGenerator):
         
         # Add days_to_missed_payment after will_default is set
         if transaction["will_default"]:
-            transaction["days_to_first_missed_payment"] = self._days_to_missed_payment(risk_score)
+            transaction["days_to_first_missed_payment"] = self._days_to_missed_payment(
+                risk_score, transaction["installment_count"]
+            )
         else:
             transaction["days_to_first_missed_payment"] = None
         
         return transaction
     
     def _calculate_risk_score(
-        self, 
-        customer: Dict[str, Any], 
-        product: Dict[str, Any], 
+        self,
+        customer: Dict[str, Any],
+        product: Dict[str, Any],
         device: Dict[str, Any],
         scenario: str
     ) -> float:
-        """Calculate risk score based on multiple factors."""
-        
-        score = 0.0
-        
-        # Customer risk factors
-        credit_scores = {"excellent": 0.1, "good": 0.3, "fair": 0.6, "poor": 0.9}
-        score += credit_scores.get(customer["credit_score_range"], 0.5)
-        
-        verification_scores = {"verified": 0.1, "partial": 0.4, "unverified": 0.8}
-        score += verification_scores.get(customer["verification_level"], 0.5)
-        
-        income_scores = {"100k+": 0.1, "75k-100k": 0.2, "50k-75k": 0.3, "25k-50k": 0.6, "<25k": 0.8}
-        score += income_scores.get(customer["income_bracket"], 0.5)
-        
-        # Device trust
-        if not device["is_trusted"]:
-            score += 0.3
-        
-        # Product risk
-        product_risk_scores = {"low": 0.1, "medium": 0.3, "high": 0.6}
-        score += product_risk_scores.get(product["risk_category"], 0.3)
-        
-        # Scenario risk
-        scenario_scores = {
-            "low_risk_purchase": 0.0,
-            "impulse_purchase": 0.3, 
-            "credit_stretched": 0.6,
+        """Calculate risk score using weighted average for natural distribution."""
+
+        # Individual risk factors (0.0 to 1.0 each)
+        credit_risk = {"excellent": 0.1, "good": 0.3, "fair": 0.6, "poor": 0.9}.get(
+            customer["credit_score_range"], 0.5)
+
+        verification_risk = {"verified": 0.1, "partial": 0.4, "unverified": 0.8}.get(
+            customer["verification_level"], 0.5)
+
+        income_risk = {"100k+": 0.1, "75k-100k": 0.2, "50k-75k": 0.3, "25k-50k": 0.6, "<25k": 0.8}.get(
+            customer["income_bracket"], 0.5)
+
+        device_risk = 0.7 if not device["is_trusted"] else 0.2
+
+        product_risk = {"low": 0.1, "medium": 0.3, "high": 0.6}.get(
+            product["risk_category"], 0.3)
+
+        scenario_risk = {
+            "low_risk_purchase": 0.1,
+            "impulse_purchase": 0.4,
+            "credit_stretched": 0.7,
             "high_risk_behavior": 0.9
-        }
-        score += scenario_scores.get(scenario, 0.0)
-        
-        # Economic stress multiplier
-        score *= (1 + self.bnpl_config.economic_stress_factor * 0.5)
-        
+        }.get(scenario, 0.3)
+
+        # Weighted average (naturally distributes 0.0-1.0)
+        risk_factors = [
+            (credit_risk, 0.3),      # 30% weight - most important
+            (verification_risk, 0.2), # 20% weight
+            (income_risk, 0.2),      # 20% weight
+            (device_risk, 0.1),      # 10% weight
+            (product_risk, 0.1),     # 10% weight
+            (scenario_risk, 0.1)     # 10% weight
+        ]
+
+        score = sum(risk * weight for risk, weight in risk_factors)
+
+        # Economic stress multiplier (mild adjustment)
+        score *= (1 + self.bnpl_config.economic_stress_factor * 0.2)
+
         return min(score, 1.0)  # Cap at 1.0
     
     def _risk_level_from_score(self, risk_score: float) -> str:
@@ -500,15 +503,129 @@ class BNPLGenerator(BaseEcommerceGenerator):
             return random.randint(0, 30)
         else:
             return random.randint(60, 300)
+
+    def _time_on_site_for_scenario(self, scenario: str) -> int:
+        """Total time spent on site before purchase (seconds)."""
+        if scenario == "high_risk_behavior":
+            return random.randint(30, 120)  # Very quick
+        elif scenario == "impulse_purchase":
+            return random.randint(120, 300)  # Quick decision
+        elif scenario == "credit_stretched":
+            return random.randint(300, 600)  # More deliberation
+        else:
+            return random.randint(180, 900)  # Normal browsing
     
     def _simulate_default(self, risk_score: float) -> bool:
-        """Simulate whether transaction will default based on risk score."""
-        adjusted_default_rate = self.bnpl_config.base_default_rate * (1 + risk_score * 3)
-        return random.random() < adjusted_default_rate
+        """Simulate historical default outcome using two-level statistical model."""
+
+        # Level 1: Population-level default probability (Beta distribution)
+        expected_default_rate = self._get_population_default_rate(risk_score)
+
+        # Level 2: Individual variation (Normal noise around expected rate)
+        actual_default_rate = self._add_individual_variation(expected_default_rate)
+
+        # Convert probability to historical boolean outcome
+        return random.random() < actual_default_rate
+
+    def _get_population_default_rate(self, risk_score: float) -> float:
+        """Map risk score to population default rate using Beta distribution.
+
+        Creates realistic clustering:
+        - Most customers around 3-5% default rate
+        - Risk score 0.0 → ~0.5% (excellent customers)
+        - Risk score 1.0 → ~20% (poor credit customers)
+        """
+        # Map risk score to Beta distribution percentiles
+        percentile = 0.05 + (risk_score * 0.90)  # 5th to 95th percentile
+
+        # Beta(2, 48) gives mean ≈ 4%, realistic shape for default rates
+        # Using scipy would be ideal, but using approximation for simplicity
+        return self._beta_ppf_approximation(percentile, a=2, b=48)
+
+    def _beta_ppf_approximation(self, percentile: float, a: float, b: float) -> float:
+        """Approximate Beta distribution percentile function."""
+        # Simple approximation: linear interpolation between realistic bounds
+        min_rate = 0.005  # 0.5% minimum default rate
+        max_rate = 0.20   # 20% maximum default rate
+
+        # Apply some curvature to approximate Beta distribution shape
+        # Most people cluster around lower rates (realistic for defaults)
+        curved_percentile = percentile ** 1.5  # Creates right-skewed distribution
+
+        return min_rate + (curved_percentile * (max_rate - min_rate))
+
+    def _add_individual_variation(self, expected_rate: float) -> float:
+        """Add individual-level variation around expected default rate."""
+        # Small normal noise representing unobservable factors
+        # (job loss, medical emergency, family crisis, etc.)
+        noise_std = 0.01  # 1% standard deviation
+
+        # Generate normal noise around expected rate
+        import numpy as np
+        actual_rate = np.random.normal(expected_rate, noise_std)
+
+        # Bound to realistic range [0.1%, 25%]
+        return max(0.001, min(0.25, actual_rate))
     
-    def _days_to_missed_payment(self, risk_score: float) -> int:
-        """Simulate days until first missed payment."""
-        # Higher risk = faster default
-        base_days = 45  # Typical first payment cycle
-        risk_factor = risk_score * 30
-        return max(7, int(base_days - risk_factor + random.randint(-10, 10)))
+    def _days_to_missed_payment(self, risk_score: float, installment_count: int) -> int:
+        """Simulate days until first missed payment using payment period model."""
+
+        # Payment periods: 1 through installment_count (bi-weekly payments)
+        possible_periods = list(range(1, installment_count + 1))
+
+        # Universal temporal risk pattern (same shape for all risk levels)
+        base_pattern = self._create_universal_risk_pattern(len(possible_periods))
+
+        # Risk score scales the entire pattern (higher risk = higher at all periods)
+        risk_multiplier = 0.5 + (risk_score * 1.5)  # Range: 0.5x to 2.0x
+        scaled_weights = [weight * risk_multiplier for weight in base_pattern]
+
+        # Normalize to valid probabilities
+        total_weight = sum(scaled_weights)
+        if total_weight <= 0:  # Defensive check
+            # Fallback to uniform distribution
+            final_weights = [1.0 / len(possible_periods)] * len(possible_periods)
+        else:
+            final_weights = [w / total_weight for w in scaled_weights]
+
+        # Choose payment period
+        chosen_period = random.choices(possible_periods, weights=final_weights)[0]
+
+        # Convert to days: period × 14 (bi-weekly)
+        days = chosen_period * 14
+
+        # ROBUSTNESS CHECK: Ensure always >= 14 when will_default = TRUE
+        if days < 14:
+            days = 14  # Force minimum valid value
+
+        return days
+
+    def _create_universal_risk_pattern(self, num_periods: int) -> list:
+        """Create universal temporal risk pattern: low early, peak middle, decline late."""
+        if num_periods <= 0:
+            return [1.0]  # Defensive fallback
+
+        if num_periods == 1:
+            return [1.0]
+        elif num_periods == 2:
+            return [0.3, 0.7]  # Slightly higher risk in second period
+        elif num_periods <= 4:
+            # Short loans: gradual increase then decline
+            return [0.2, 0.4, 0.3, 0.1][:num_periods]
+        else:
+            # Longer loans: more realistic curve
+            pattern = []
+            for i in range(num_periods):
+                # Create bell-curve-like pattern peaked around middle periods
+                position = i / (num_periods - 1)  # 0.0 to 1.0
+
+                # Bell curve: low at ends, high in middle
+                # Using simple quadratic approximation of bell curve
+                if position <= 0.5:
+                    risk_level = 0.1 + (position * 1.6)  # Rise from 0.1 to 0.9
+                else:
+                    risk_level = 0.9 - ((position - 0.5) * 1.6)  # Fall from 0.9 to 0.1
+
+                pattern.append(max(0.05, risk_level))  # Minimum 5% weight
+
+            return pattern
