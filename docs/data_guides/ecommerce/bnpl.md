@@ -117,6 +117,12 @@ This guide explains the business context and data generation logic for each fiel
 
 **Customer history**: Aggregate features by `customer_id` for repeat customer analysis.
 
+### Known Data Limitations
+
+**Age-Spending Correlation Missing**: Currently all age groups generate identical spending patterns. Real e-commerce shows distinct spending by age (18-24: lower amounts, 35-44: highest amounts). Use `customer_income_bracket` as a proxy for purchasing power until this correlation is implemented.
+
+**Target Variable Context**: Fields `will_default` and `days_to_first_missed_payment` represent historical outcomes for training data, not real-time predictions.
+
 ---
 
 This data represents realistic BNPL transaction patterns with proper business logic and industry-standard risk assessment practices.

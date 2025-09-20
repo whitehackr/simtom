@@ -347,6 +347,22 @@ Industry Expert → Domain JSON → Community Review → Validation → Release
 
 **Future Solution**: Migrate to Pydantic V2 `@field_validator` syntax.
 
+### K3: Age-Based Spending Correlation Missing
+**Issue**: All age groups currently generate identical spending patterns (same transaction amounts), creating unrealistic demographic distributions for ML training.
+
+**Impact**: ML models cannot learn realistic age-spending correlations. Real e-commerce shows:
+- 18-24: Lower amounts (students, entry-level income)
+- 25-34: Higher amounts (peak earning, family formation)
+- 35-44: Highest amounts (peak household income)
+- 45-54: Moderate amounts (established spending patterns)
+- 55+: Lower amounts (retirement planning, fixed income)
+
+**Root Cause**: Base transaction amount = product price, with no age-based purchase behavior differentiation.
+
+**Workaround**: Document limitation in ML training notes. Use income brackets as proxy for purchasing power.
+
+**Future Solution**: Implement age-based purchase multipliers in `BaseEcommerceGenerator._apply_age_based_spending()` method.
+
 ---
 
 *This roadmap represents the technical foundation for scaling Simtom while maintaining data quality and performance. Each item builds incrementally toward the goal of supporting massive generator ecosystems with minimal operational overhead.*
