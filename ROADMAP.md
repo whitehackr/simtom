@@ -327,6 +327,26 @@ Industry Expert → Domain JSON → Community Review → Validation → Release
 - **Community**: Self-service domain contribution by industry experts
 - **Maintainability**: 90% reduction in duplicated business logic code
 
+## Known Issues & Limitations
+
+### K1: Historical vs Current-Date Data Inconsistency
+**Issue**: Target variables (`will_default`, `days_to_first_missed_payment`) represent historical outcomes but are generated for current-date transactions, creating logical inconsistency.
+
+**Impact**: ML teams must understand these fields represent "what we now know happened" for historical data vs "what we predict will happen" for current data.
+
+**Workaround**: Document fields with warnings. ML teams should ignore target variables when using current-date generation mode.
+
+**Future Solution**: Implement mode-specific field generation or separate historical/predictive field sets.
+
+### K2: Pydantic V1 Deprecation Warnings
+**Issue**: Current codebase uses Pydantic V1 `@validator` decorators which are deprecated in Pydantic V2.
+
+**Impact**: Warning noise in test output, future compatibility concerns.
+
+**Workaround**: Warnings don't affect functionality.
+
+**Future Solution**: Migrate to Pydantic V2 `@field_validator` syntax.
+
 ---
 
 *This roadmap represents the technical foundation for scaling Simtom while maintaining data quality and performance. Each item builds incrementally toward the goal of supporting massive generator ecosystems with minimal operational overhead.*
