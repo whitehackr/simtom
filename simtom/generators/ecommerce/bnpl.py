@@ -514,9 +514,56 @@ class BNPLGenerator(BaseEcommerceGenerator):
             return random.randint(180, 900)  # Normal browsing
     
     def _simulate_default(self, risk_score: float) -> bool:
-        """Simulate whether transaction will default based on risk score."""
-        adjusted_default_rate = self.bnpl_config.base_default_rate * (1 + risk_score * 3)
-        return random.random() < adjusted_default_rate
+        """Simulate historical default outcome using two-level statistical model."""
+
+        # Level 1: Population-level default probability (Beta distribution)
+        expected_default_rate = self._get_population_default_rate(risk_score)
+
+        # Level 2: Individual variation (Normal noise around expected rate)
+        actual_default_rate = self._add_individual_variation(expected_default_rate)
+
+        # Convert probability to historical boolean outcome
+        return random.random() < actual_default_rate
+
+    def _get_population_default_rate(self, risk_score: float) -> float:
+        """Map risk score to population default rate using Beta distribution.
+
+        Creates realistic clustering:
+        - Most customers around 3-5% default rate
+        - Risk score 0.0 → ~0.5% (excellent customers)
+        - Risk score 1.0 → ~20% (poor credit customers)
+        """
+        # Map risk score to Beta distribution percentiles
+        percentile = 0.05 + (risk_score * 0.90)  # 5th to 95th percentile
+
+        # Beta(2, 48) gives mean ≈ 4%, realistic shape for default rates
+        # Using scipy would be ideal, but using approximation for simplicity
+        return self._beta_ppf_approximation(percentile, a=2, b=48)
+
+    def _beta_ppf_approximation(self, percentile: float, a: float, b: float) -> float:
+        """Approximate Beta distribution percentile function."""
+        # Simple approximation: linear interpolation between realistic bounds
+        min_rate = 0.005  # 0.5% minimum default rate
+        max_rate = 0.20   # 20% maximum default rate
+
+        # Apply some curvature to approximate Beta distribution shape
+        # Most people cluster around lower rates (realistic for defaults)
+        curved_percentile = percentile ** 1.5  # Creates right-skewed distribution
+
+        return min_rate + (curved_percentile * (max_rate - min_rate))
+
+    def _add_individual_variation(self, expected_rate: float) -> float:
+        """Add individual-level variation around expected default rate."""
+        # Small normal noise representing unobservable factors
+        # (job loss, medical emergency, family crisis, etc.)
+        noise_std = 0.01  # 1% standard deviation
+
+        # Generate normal noise around expected rate
+        import numpy as np
+        actual_rate = np.random.normal(expected_rate, noise_std)
+
+        # Bound to realistic range [0.1%, 25%]
+        return max(0.001, min(0.25, actual_rate))
     
     def _days_to_missed_payment(self, risk_score: float) -> int:
         """Simulate days until first missed payment."""
