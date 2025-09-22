@@ -121,6 +121,8 @@ This guide explains the business context and data generation logic for each fiel
 
 **Age-Spending Correlation Missing**: Currently all age groups generate identical spending patterns. Real e-commerce shows distinct spending by age (18-24: lower amounts, 35-44: highest amounts). Use `customer_income_bracket` as a proxy for purchasing power until this correlation is implemented.
 
+**Hourly Traffic Patterns**: Current hour-of-day distribution shows artificial cliff-edge pattern (sharp 9am spike, flat plateau). Real e-commerce has multiple daily peaks (lunch 12-1pm, evening 7-9pm). Consider this when building temporal features.
+
 **Target Variable Context**: Fields `will_default` and `days_to_first_missed_payment` represent historical outcomes for training data, not real-time predictions.
 
 ---

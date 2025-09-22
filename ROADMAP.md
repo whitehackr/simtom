@@ -363,6 +363,21 @@ Industry Expert → Domain JSON → Community Review → Validation → Release
 
 **Future Solution**: Implement age-based purchase multipliers in `BaseEcommerceGenerator._apply_age_based_spending()` method.
 
+### K4: Unrealistic Hourly Traffic Distribution
+**Issue**: Current business hour pattern creates artificial cliff-edge distribution with sharp 9am spike and flat plateau, missing realistic e-commerce traffic peaks.
+
+**Impact**: ML models cannot learn proper temporal shopping patterns. Real e-commerce shows:
+- **Lunch peak** (12-1pm): Highest daytime traffic
+- **Evening peak** (7-9pm): Highest overall traffic (after work/dinner)
+- **Gradual transitions**: Smooth curves, not hard cutoffs at business hours
+- **Multiple daily peaks**: Not flat 9am-5pm plateau
+
+**Root Cause**: `_generate_business_hour()` uses simplistic 70%/20%/10% bucketing instead of realistic hourly curves.
+
+**Workaround**: Document pattern limitations for temporal feature engineering.
+
+**Future Solution**: Implement multi-peak hourly distribution with realistic e-commerce traffic curves.
+
 ---
 
 *This roadmap represents the technical foundation for scaling Simtom while maintaining data quality and performance. Each item builds incrementally toward the goal of supporting massive generator ecosystems with minimal operational overhead.*
