@@ -378,6 +378,55 @@ Industry Expert → Domain JSON → Community Review → Validation → Release
 
 **Future Solution**: Implement multi-peak hourly distribution with realistic e-commerce traffic curves.
 
+### K5: Unrealistic Customer Repeat Frequency
+**Issue**: Default 70% repeat customer rate creates artificially high customer frequency, misrepresenting BNPL user behavior patterns.
+
+**Impact**: ML models cannot learn realistic customer lifecycle patterns. Real BNPL shows:
+- **First-time users**: 60-80% (BNPL often experimental)
+- **Repeat users**: 20-40% (satisfied users)
+- **High-frequency users**: <5% (power users)
+
+**Root Cause**: `repeat_customer_rate: 0.7` assumes e-commerce-like loyalty rather than BNPL adoption patterns.
+
+**Workaround**: Configure lower `repeat_customer_rate` (0.2-0.4) for realistic BNPL customer behavior.
+
+**Future Solution**: Implement BNPL-specific customer lifecycle modeling with realistic adoption curves.
+
+### K6: ML Signal Strength Crisis (CRITICAL)
+**Issue**: Current approach destroys predictive relationships between features and target variables through over-randomization, making ML model training impossible.
+
+**Impact**: Maximum feature-target correlation ~0.05 (essentially random). ML models achieve only 0.615 AUC-ROC with maximum confidence scores of 31.5%. Production BNPL requires 90-95% precision at high-risk tier.
+
+**Root Cause**: Two-level statistical model prioritizes variance injection over correlation preservation. Noise addition destroys the causal relationships ML models need to learn.
+
+**Workaround**: None - blocks all ML development. Requires fundamental architectural redesign.
+
+**Future Solution**: Implement latent factor modeling where customer financial health drives all feature generation, preserving realistic correlations while adding controlled noise.
+
+### K7: Impossible Customer Default Patterns (CRITICAL)
+**Issue**: Per-transaction default generation creates impossible scenarios where customers default on multiple transactions within the same day at different times.
+
+**Impact**: Violates fundamental risk modeling assumptions that default is a customer state, not transaction characteristic. Makes customer-level risk assessment impossible.
+
+**Example**: Customer defaults at 10:00 AM, successfully transacts at 10:15 AM, defaults again at 11:30 AM - scenario impossible in real BNPL systems.
+
+**Root Cause**: Default generation occurs independently per transaction without customer state persistence.
+
+**Workaround**: Filter out customers with inconsistent default patterns in ML preprocessing.
+
+**Future Solution**: Implement customer financial state management where default becomes persistent customer condition affecting all future transactions.
+
+### K8: Hyperactive Customer Transaction Patterns (CRITICAL)
+**Issue**: Current repeat rate and generation frequency creates customers transacting 720+ times per day, completely unrealistic for BNPL behavior.
+
+**Impact**: Destroys temporal pattern learning, customer lifecycle modeling, and frequency-based risk assessment. Real BNPL customers transact 1-4 times per month.
+
+**Root Cause**: 70% repeat rate combined with hourly generation without realistic frequency limiting.
+
+**Workaround**: Apply post-generation frequency filtering, though this reduces dataset size significantly.
+
+**Future Solution**: Implement transaction frequency budgets based on customer financial profiles with realistic inter-transaction intervals.
+
 ---
 
 *This roadmap represents the technical foundation for scaling Simtom while maintaining data quality and performance. Each item builds incrementally toward the goal of supporting massive generator ecosystems with minimal operational overhead.*
